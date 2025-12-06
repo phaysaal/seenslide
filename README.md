@@ -1,18 +1,30 @@
 # SeenSlide
 
-**See it again**
+**Real-time Presentation Capture & Sharing**
 
-SeenSlide is an open-source system that allows audience members to view and navigate previously shown slides on their own devices during live presentations, while respecting the presenter's control over what has been revealed.
+Share your presentation slides instantly with your audience. Capture slides automatically as you present, and let viewers follow along on their phones or tablets via a simple QR code.
 
-## Features
+Perfect for conferences, classrooms, training sessions, and webinars.
 
-- 🖥️ **Automatic screen capture** - Captures presentation slides at configurable intervals
-- 🔍 **Intelligent deduplication** - Filters out duplicate slides using multiple strategies
-- 🌐 **Web-based viewer** - Audience accesses slides via browser (no app installation)
-- 🎛️ **Admin GUI** - Easy-to-use desktop interface for organizers
-- 🔌 **Modular architecture** - Pluggable components for easy customization
-- 📱 **Real-time updates** - New slides appear instantly via WebSocket
-- 🎨 **Presentation-agnostic** - Works with PowerPoint, Keynote, PDF, or any presentation software
+---
+
+## ✨ Features
+
+### For Presenters
+- 🎯 **One-Click Installation** - Ubuntu installer sets up everything automatically
+- 🔐 **Secure Admin Panel** - Web-based control center with authentication
+- 📊 **Smart Capture** - Automatic screen capture with intelligent deduplication
+- 🎚️ **Adjustable Sensitivity** - Fine-tune how strict duplicate detection is
+- 📱 **QR Code Sharing** - Instant audience access via QR code
+- 🖥️ **Wayland Support** - Works with modern Linux desktop environments
+
+### For Viewers
+- 📱 **Mobile Optimized** - Perfect viewing on phones and tablets
+- 🔄 **Live Mode** - Auto-jump to latest slides as they appear
+- 🔍 **Zoom & Pan** - Pinch to zoom on touch devices
+- ⛶ **Fullscreen Mode** - Immersive viewing with side navigation
+- ⬅️➡️ **Full Navigation** - Browse slides at your own pace
+- 🌐 **No App Required** - Works in any web browser
 
 ## Architecture
 
@@ -37,113 +49,116 @@ SeenSlide uses a modular, plugin-based architecture:
     └──────────────┘          └──────────────┘
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
-### Prerequisites
-
-- Python 3.10 or higher
-- Ubuntu Linux (macOS and Windows support coming soon)
-- pip package manager
-
-### Installation
+### One-Click Installation (Ubuntu/Debian)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/seenslide.git
-cd seenslide
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the admin GUI
-python -m modules.admin.main
+# Download and run the installer
+wget https://raw.githubusercontent.com/phaysaal/seenslide/main/install-ubuntu.sh
+bash install-ubuntu.sh
 ```
 
-### Basic Usage
+That's it! The installer will:
+- ✅ Install all dependencies
+- ✅ Set up the application
+- ✅ Create your admin account
+- ✅ Add desktop shortcuts
 
-1. **Launch Admin Panel**
-   ```bash
-   python -m modules.admin.main
-   ```
+**Time:** 2-3 minutes
 
-2. **Configure Settings**
-   - Select which monitor/screen to capture
-   - Set capture interval (default: 2 seconds)
-   - Choose deduplication strategy
+### Launch SeenSlide
 
-3. **Start Capture**
-   - Click "Start Capture" button
-   - Present your slides normally
+**From Desktop:**
+- Search for "SeenSlide Admin" in applications menu
 
-4. **Share with Audience**
-   - Audience opens browser to `http://your-ip:8080`
-   - They see slides as they're presented
-   - Can navigate back to review previous slides
+**From Terminal:**
+```bash
+seenslide-admin
+```
 
-5. **Stop Capture**
-   - Click "Stop Capture" when presentation ends
-   - Slides remain available for review
+**Then:**
+1. Open browser: `http://localhost:8081`
+2. Login with your credentials
+3. Click "Start Capture"
+4. Show QR code to audience
+
+**Viewers access at:** `http://YOUR_IP:8080`
+
+### System Requirements
+
+- **OS**: Ubuntu 20.04+ or Debian 11+
+- **Python**: 3.9 or higher
+- **RAM**: 4GB recommended
+- **Display**: X11 or Wayland
 
 ## Configuration
 
-Edit `config/plugins.yaml` to customize:
+SeenSlide is configured primarily through the **Admin Panel** web interface:
+
+- **Deduplication Tolerance**: Adjustable slider (0-100%) controls how strictly duplicates are filtered
+  - 0-80%: Detect small changes (10-50% of screen)
+  - 80-95%: Detect medium changes (50-90% of screen)
+  - 95-100%: Only detect complete window changes
+
+- **Monitor Selection**: Choose which display to capture
+- **Capture Interval**: Configured in session settings
+
+Advanced users can edit `config/plugins.yaml` for low-level settings:
 
 ```yaml
 capture:
-  provider: "mss"
+  provider: "portal"  # Uses XDG Desktop Portal for Wayland
   config:
-    monitor_id: 1
-    interval_seconds: 2.0
+    framerate: 10
+    cursor_mode: "hidden"
 
 deduplication:
-  strategy: "hash"  # Options: hash, perceptual, hybrid
-  
+  strategy: "perceptual"
+  perceptual_threshold: 0.50
+
 storage:
   provider: "filesystem"
   config:
-    base_path: "/tmp/slidesync"
-
-server:
-  host: "0.0.0.0"
-  port: 8080
+    base_path: "/tmp/seenslide"
 ```
 
 ## Module Overview
 
 ### Capture Module
-Captures screenshots at regular intervals using various backends:
-- **MSS** (default) - Fast, cross-platform screen capture
-- **Scrot** - Linux native tool
-- **Wayland** - For Wayland compositors (future)
+Captures screenshots at configurable intervals:
+- **XDG Desktop Portal** (default) - Wayland-native screen capture via PipeWire
+- **MSS** - Fallback for X11 systems
+- Automatic permission handling with restore tokens
 
 ### Deduplication Engine
 Filters duplicate/similar slides using:
-- **Hash-based** - Pixel-perfect comparison (fastest)
-- **Perceptual** - Detects visual similarity (handles minor changes)
-- **LLM-based** - Intelligent content comparison (future)
-- **Hybrid** - Combines multiple strategies
+- **Perceptual Hashing** - Detects visual similarity with configurable tolerance
+- **Hash-based** - Pixel-perfect comparison for exact duplicates
+- **Hybrid** - Combines multiple strategies for optimal results
+- Adjustable sensitivity via admin panel slider
 
 ### Storage Module
 Persists slides and metadata:
-- **Filesystem** - Local storage with SQLite metadata
-- **S3** - Cloud storage (future)
+- **Filesystem** - Local storage with organized session directories
+- **SQLite** - User accounts and session metadata
+- Automatic cleanup and session deletion
 
-### Web Server
-FastAPI-based server with:
+### Viewer Server
+FastAPI-based server (port 8080) with:
 - REST API for slide retrieval
-- WebSocket for real-time updates
-- Static file serving for web client
+- WebSocket for real-time updates with polling fallback
+- Mobile-optimized responsive web interface
+- Fullscreen mode with touch support
+- Zoom and pan functionality
 
-### Admin GUI
-CustomTkinter desktop application for:
-- Session management
-- Configuration
-- Monitoring
-- Control
+### Admin Server
+FastAPI-based control panel (port 8081) with:
+- Secure authentication with session management
+- Capture and viewer server control
+- QR code generation for easy sharing
+- Real-time status monitoring
+- Session and slide management
 
 ## Development
 
@@ -206,19 +221,32 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Development Roadmap
 
+**Completed (v1.0 Beta):**
 - [x] Core architecture and interfaces
-- [x] Basic capture module (MSS)
+- [x] XDG Desktop Portal capture (Wayland support)
+- [x] MSS capture provider (X11 fallback)
+- [x] Perceptual hash deduplication with adjustable tolerance
 - [x] Hash-based deduplication
-- [x] Filesystem storage
+- [x] Filesystem storage with SQLite
 - [x] Web server with REST API
-- [x] Admin GUI
-- [ ] Perceptual deduplication
-- [ ] WebSocket real-time updates
+- [x] WebSocket real-time updates + polling fallback
+- [x] Admin web panel with authentication
+- [x] Mobile-optimized viewer interface
+- [x] Fullscreen mode with touch controls
+- [x] Zoom and pan functionality
+- [x] QR code sharing
+- [x] Session management
+- [x] One-click Ubuntu installer
+
+**Planned for Future Releases:**
 - [ ] Docker deployment
 - [ ] LLM-based deduplication
-- [ ] macOS support
-- [ ] Windows support
-- [ ] Mobile-friendly web client
+- [ ] Cloud storage (S3) support
+- [ ] macOS installer and support
+- [ ] Windows installer and support
+- [ ] Multi-presenter sessions
+- [ ] Annotation tools
+- [ ] PDF export
 
 ## Use Cases
 
@@ -250,15 +278,15 @@ Built with:
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/slidesync/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/slidesync/discussions)
-- **Documentation**: [docs/](docs/)
+- **Issues**: [GitHub Issues](https://github.com/phaysaal/seenslide/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/phaysaal/seenslide/discussions)
+- **Documentation**: See [ADMIN_GUIDE.md](ADMIN_GUIDE.md), [TESTING_GUIDE.md](TESTING_GUIDE.md), and [INSTALL.md](INSTALL.md)
 
 ## Author
 
 **Mahmudul Faisal Al Ameen**
 - Email: mahmudulfaisal@gmail.com
-- GitHub: [@yourusername](https://github.com/yourusername)
+- GitHub: [@phaysaal](https://github.com/phaysaal)
 
 ### Development
 
