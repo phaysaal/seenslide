@@ -1,0 +1,154 @@
+# SeenSlide Configuration File
+# Edit this file to customize SeenSlide behavior
+
+# Session configuration
+session:
+  default_name: "Untitled Session"
+  auto_save: true
+  capture_interval_seconds: 2.0
+  max_slides_per_session: 1000
+
+# Capture module configuration
+capture:
+  provider: "mss"  # Options: mss, scrot (future), wayland (future)
+  config:
+    monitor_id: 1  # 1 = primary monitor, 0 = all monitors combined
+    quality: 90    # Image quality (0-100) for JPEG
+    format: "png"  # Options: png, jpeg (png recommended for slides)
+    capture_cursor: false  # Include mouse cursor in capture
+
+# Deduplication module configuration
+deduplication:
+  strategy: "hash"  # Options: hash, perceptual, hybrid, llm (future)
+  config:
+    # Hash strategy (exact pixel comparison)
+    hash_algorithm: "md5"  # Options: md5, sha256
+    
+    # Perceptual strategy (visual similarity)
+    perceptual_threshold: 0.95  # 0.0-1.0, higher = more strict (0.95 = 95% similar)
+    perceptual_hash_size: 8     # pHash size (8 or 16), larger = more precise
+    
+    # LLM strategy (intelligent content comparison - future)
+    llm_enabled: false
+    llm_provider: "openai"      # Options: openai, anthropic
+    llm_model: "gpt-4-vision-preview"
+    llm_api_key_env: "OPENAI_API_KEY"  # Environment variable name
+    llm_prompt: "Compare these two slides. Are they showing the same content? Answer YES or NO."
+    
+    # Hybrid strategy (combines multiple strategies)
+    hybrid_stages:
+      - "hash"        # First: try exact match (fastest)
+      - "perceptual"  # Second: try perceptual similarity
+      # - "llm"       # Third: use LLM if previous stages uncertain
+
+# Storage module configuration
+storage:
+  provider: "filesystem"  # Options: filesystem, s3 (future), database (future)
+  config:
+    base_path: "/tmp/seenslide"  # Base directory for all storage
+    images_subdir: "images"      # Subdirectory for slide images
+    thumbnails_subdir: "thumbnails"
+    database_subdir: "db"
+    
+    create_thumbnails: true
+    thumbnail_width: 320         # Thumbnail width in pixels (height auto-scaled)
+    thumbnail_quality: 85        # JPEG quality for thumbnails
+    
+    database_type: "sqlite"      # Options: sqlite, postgresql (future)
+    database_filename: "seenslide.db"
+    
+    # Cleanup settings
+    auto_cleanup_days: 7         # Auto-delete sessions older than N days (0 = disabled)
+    max_storage_gb: 10           # Maximum storage usage in GB (0 = unlimited)
+
+# Web server configuration
+server:
+  host: "0.0.0.0"               # Listen on all interfaces
+  port: 8080                    # HTTP port
+  
+  enable_cors: true             # Enable CORS for web clients
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+    - "*"                       # Allow all origins (use carefully!)
+  
+  websocket_enabled: true
+  websocket_path: "/ws"
+  websocket_ping_interval: 30   # Seconds between ping messages
+  websocket_ping_timeout: 10    # Seconds to wait for pong
+  
+  max_clients: 500              # Maximum concurrent WebSocket clients
+  rate_limit_enabled: true
+  rate_limit_requests: 100      # Max requests per minute per client
+  
+  static_files_path: "modules/server/static"
+  
+  # API settings
+  api_prefix: "/api/v1"
+  api_title: "SeenSlide API"
+  api_description: "Real-time slide navigation API"
+  api_version: "1.0.0"
+
+# Admin GUI configuration
+admin:
+  gui_framework: "customtkinter"
+  
+  # Appearance
+  theme: "dark"           # Options: dark, light, system
+  color_theme: "blue"     # Options: blue, green, dark-blue
+  
+  # Window settings
+  window_width: 800
+  window_height: 600
+  window_resizable: true
+  remember_window_position: true
+  window_position_file: "~/.seenslide/window_pos.json"
+  
+  # UI settings
+  show_preview: true      # Show live preview of captures
+  preview_update_interval: 1.0  # Seconds
+  show_stats: true        # Show capture/dedup statistics
+  
+  # Behavior
+  confirm_on_exit: true
+  minimize_to_tray: false  # System tray support (future)
+  start_minimized: false
+
+# Logging configuration
+logging:
+  level: "INFO"           # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  
+  # File logging
+  log_to_file: true
+  log_file: "/tmp/seenslide/logs/seenslide.log"
+  max_file_size_mb: 10
+  backup_count: 3         # Number of backup log files to keep
+  
+  # Console logging
+  log_to_console: true
+  console_colors: true
+  
+  # Module-specific log levels (optional)
+  module_levels:
+    capture: "INFO"
+    dedup: "INFO"
+    storage: "INFO"
+    server: "INFO"
+    admin: "INFO"
+
+# Advanced settings
+advanced:
+  # Performance
+  max_worker_threads: 4
+  image_processing_pool_size: 2
+  
+  # Debug
+  debug_mode: false
+  save_debug_images: false
+  debug_output_dir: "/tmp/seenslide/debug"
+  
+  # Experimental features
+  enable_analytics: false
+  enable_crash_reporting: false

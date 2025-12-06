@@ -1,0 +1,103 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+venv_portal/
+ENV/
+env/
+.venv
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.log
+
+# SeenSlide specific
+/tmp/seenslide/
+*.session
+*.db
+*.sqlite
+*.sqlite3
+
+# Configuration files with secrets
+config/secrets.yaml
+.env
+.env.local
+
+# Wayland configuration (contains restore token)
+dev/config_wayland.yaml
+
+# Logs
+logs/
+*.log
+/tmp/server.log
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Temporary files
+*.swp
+*.swo
+*.tmp
+.~lock.*
+
+# User data
+user_data/
+sessions/
+captured_slides/
+
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+.Python

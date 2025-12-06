@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # Web server service
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: seenslide-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config:ro
+      - seenslide-data:/data
+    environment:
+      - SEENSLIDE_CONFIG=/app/config/default.yaml
+      - SEENSLIDE_DATA_DIR=/data
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    networks:
+      - seenslide-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Capture daemon service (runs on presentation machine)
+  capture:
+    build:
+      context: .
+      dockerfile: Dockerfile.capture
+    container_name: seenslide-capture
+    volumes:
+      - ./config:/app/config:ro
+      - seenslide-data:/data
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro  # For X11 screen capture
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - SEENSLIDE_CONFIG=/app/config/default.yaml
+      - SEENSLIDE_DATA_DIR=/data
+      - LOG_LEVEL=INFO
+    network_mode: host  # Needed for X11
+    privileged: true    # Needed for screen capture
+    restart: unless-stopped
+    depends_on:
+      - server
+
+volumes:
+  seenslide-data:
+    driver: local
+
+networks:
+  seenslide-network:
+    driver: bridge

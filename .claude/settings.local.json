@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(pytest:*)",
+      "Bash(echo:*)",
+      "Bash(DISPLAY=\"\" pytest:*)",
+      "Bash(chmod:*)",
+      "Bash(ls:*)",
+      "Bash(venv/bin/pip install:*)",
+      "Bash(venv/bin/python:*)",
+      "Bash(timeout 5 venv/bin/python:*)",
+      "Bash(venv_portal/bin/python:*)",
+      "Bash(venv_portal/bin/pip install -q mss Pillow imagehash pyyaml python-dateutil)",
+      "Bash(timeout 60 venv_portal/bin/python:*)",
+      "Bash(timeout 180 venv_portal/bin/python:*)",
+      "Bash(timeout 15 venv_portal/bin/python:*)",
+      "Bash(find:*)",
+      "Bash(venv_portal/bin/pip install:*)",
+      "Bash(timeout 5 venv_portal/bin/python:*)",
+      "Bash(timeout 8 venv_portal/bin/python:*)",
+      "Bash(timeout 10 venv_portal/bin/python:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
