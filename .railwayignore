@@ -1,0 +1,62 @@
+# Railway Ignore File
+# Files and directories to exclude from deployment
+
+# Virtual environments
+venv/
+venv_portal/
+env/
+ENV/
+
+# Testing
+tests/
+*.egg-info/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Development
+dev/
+docs/
+*.md
+!README.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Local data
+/tmp/
+*.db
+*.sqlite
+*.log
+
+# Config files
+.env.local
+config/local*.yaml
+
+# Desktop files
+*.desktop
+seenslide_admin.py
+usermgr.py
+install*.sh
+setup-git.sh
+
+# Modules not needed in cloud
+modules/capture/
+modules/dedup/
+modules/admin/static/
+modules/web/
+modules/server/
