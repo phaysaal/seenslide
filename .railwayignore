@@ -54,6 +54,9 @@ usermgr.py
 install*.sh
 setup-git.sh
 
+# Use cloud requirements instead of main
+requirements.txt
+
 # Modules not needed in cloud
 modules/capture/
 modules/dedup/
