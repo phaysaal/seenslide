@@ -1,10 +1,10 @@
 # Nixpacks configuration for Railway deployment
 
 [phases.setup]
-nixPkgs = ["python312", "gcc", "gnumake", "rustc", "cargo"]
+nixPkgs = ["python312", "python312Packages.pip", "gcc", "gnumake", "rustc", "cargo"]
 
 [phases.install]
-cmds = ["python -m pip install -r requirements.txt"]
+cmds = ["python -m pip install --upgrade pip", "python -m pip install -r requirements.txt"]
 
 [phases.build]
 cmds = ["echo 'No build step needed'"]
