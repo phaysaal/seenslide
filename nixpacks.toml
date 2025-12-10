@@ -1,17 +1,7 @@
 # Nixpacks configuration for Railway deployment
 
 [phases.setup]
-nixPkgs = ["python312", "gcc", "gnumake", "rustc", "cargo"]
-
-[phases.install]
-cmds = [
-    "python -m ensurepip --upgrade",
-    "python -m pip install --upgrade pip setuptools wheel",
-    "python -m pip install -r requirements.txt"
-]
-
-[phases.build]
-cmds = ["echo 'No build step needed'"]
+nixPkgs = ["gcc", "gnumake", "rustc", "cargo"]
 
 [start]
 cmd = "python -m modules.cloud.server --host 0.0.0.0 --port $PORT"
