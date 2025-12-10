@@ -1,7 +1,7 @@
 # Nixpacks configuration for Railway deployment
 
 [phases.setup]
-nixPkgs = ["gcc", "gnumake", "rustc", "cargo"]
+nixPkgs = ["python312", "gcc", "gnumake", "rustc", "cargo", "pipenv"]
 
 [start]
 cmd = "python -m modules.cloud.server --host 0.0.0.0 --port $PORT"
