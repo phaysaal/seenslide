@@ -54,8 +54,8 @@ usermgr.py
 install*.sh
 setup-git.sh
 
-# Use cloud requirements instead of main
-requirements.txt
+# Local development requirements (not needed in cloud)
+requirements-local.txt
 
 # Modules not needed in cloud
 modules/capture/
