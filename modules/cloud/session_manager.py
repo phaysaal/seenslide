@@ -5,9 +5,9 @@ import string
 import logging
 import time
 import json
+import asyncio
 from typing import Optional, List, Dict, Any
 from pathlib import Path
-from threading import Lock
 
 from modules.cloud.models import CloudSession
 from modules.cloud.session_privacy import SessionPrivacyManager
@@ -69,7 +69,7 @@ class CloudSessionManager:
     def __init__(self):
         """Initialize session manager."""
         self.sessions: Dict[str, CloudSession] = {}
-        self.lock = Lock()
+        self.lock = asyncio.Lock()
         logger.info("Session manager initialized")
 
     async def load_active_sessions(self):
@@ -134,7 +134,7 @@ class CloudSessionManager:
         Raises:
             ValueError: If failed to generate unique ID or invalid password
         """
-        with self.lock:
+        async with self.lock:
             # Validate password if provided
             password_hash = None
             password_salt = None
@@ -238,15 +238,15 @@ class CloudSessionManager:
         Returns:
             CloudSession if found, None otherwise
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions.get(session_id)
             if session:
                 session.update_activity()
-                # Save asynchronously without blocking
-                # Note: In production, consider using background tasks
+                # Note: We update in-memory but don't save to DB on every get
+                # to avoid performance overhead. Consider background task for periodic saves.
             return session
 
-    def validate_session_password(
+    async def validate_session_password(
         self, session_id: str, password: str
     ) -> tuple[bool, Optional[str]]:
         """Validate password for a session.
@@ -258,7 +258,7 @@ class CloudSessionManager:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions.get(session_id)
             if not session:
                 return False, "Session not found"
@@ -290,7 +290,7 @@ class CloudSessionManager:
         Returns:
             True if session was ended, False if not found
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions.get(session_id)
             if not session:
                 return False
@@ -312,7 +312,7 @@ class CloudSessionManager:
             session_id: Session ID
             count: New viewer count
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions.get(session_id)
             if session:
                 session.viewer_count = count
@@ -328,7 +328,7 @@ class CloudSessionManager:
         Returns:
             True if incremented, False if session not found or at capacity
         """
-        with self.lock:
+        async with self.lock:
             session = self.sessions.get(session_id)
             if not session:
                 return False
@@ -338,13 +338,13 @@ class CloudSessionManager:
                 return True
             return False
 
-    def list_active_sessions(self) -> List[CloudSession]:
+    async def list_active_sessions(self) -> List[CloudSession]:
         """Get list of all active sessions.
 
         Returns:
             List of active CloudSession instances
         """
-        with self.lock:
+        async with self.lock:
             return list(self.sessions.values())
 
     async def cleanup_expired_sessions(self, max_age_hours: int = 24):
@@ -353,7 +353,7 @@ class CloudSessionManager:
         Args:
             max_age_hours: Maximum age in hours before expiring
         """
-        with self.lock:
+        async with self.lock:
             current_time = time.time()
             cutoff_time = current_time - (max_age_hours * 3600)
 
@@ -371,13 +371,13 @@ class CloudSessionManager:
             if expired:
                 logger.info(f"Cleaned up {len(expired)} expired sessions")
 
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """Get overall statistics.
 
         Returns:
             Dictionary with statistics
         """
-        with self.lock:
+        async with self.lock:
             return {
                 "active_sessions": len(self.sessions),
                 "total_slides": sum(s.total_slides for s in self.sessions.values()),

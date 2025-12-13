@@ -173,7 +173,7 @@ def create_cloud_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
-        stats = session_manager.get_stats() if session_manager else {}
+        stats = await session_manager.get_stats() if session_manager else {}
         return {
             "status": "healthy",
             "stats": stats
@@ -348,7 +348,7 @@ def create_cloud_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid session ID format")
 
         # Validate password
-        is_valid, error_message = session_manager.validate_session_password(
+        is_valid, error_message = await session_manager.validate_session_password(
             session_id, body.password
         )
 
@@ -554,7 +554,7 @@ def create_cloud_app() -> FastAPI:
 
         Rate limit: 20 requests per minute per IP.
         """
-        sessions = session_manager.list_active_sessions()
+        sessions = await session_manager.list_active_sessions()
         return {
             "sessions": [
                 SessionResponse(
