@@ -393,7 +393,7 @@ def create_cloud_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid session ID format")
 
         # Get session
-        session = session_manager.get_session(session_id)
+        session = await session_manager.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
