@@ -13,6 +13,7 @@ import os
 
 from modules.cloud.session_manager import CloudSessionManager, SessionIDGenerator
 from modules.cloud.slide_storage import CloudSlideStorage
+from modules.cloud.database import init_db, close_db
 from modules.cloud.security import (
     RateLimiter,
     SessionTokenManager,
@@ -100,12 +101,23 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting SeenSlide Cloud Server")
 
+    # Initialize database connection
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        logger.info("Initializing PostgreSQL database...")
+        await init_db(database_url, run_migrations=True)
+    else:
+        logger.warning("DATABASE_URL not set, database will not be initialized")
+
     # Initialize managers
-    db_path = os.getenv("SEENSLIDE_DB_PATH", "/tmp/seenslide_cloud.db")
     storage_path = os.getenv("SEENSLIDE_STORAGE_PATH", "/tmp/seenslide_slides")
 
-    session_manager = CloudSessionManager(db_path=db_path)
-    slide_storage = CloudSlideStorage(db_path=db_path, storage_path=storage_path)
+    session_manager = CloudSessionManager()
+    slide_storage = CloudSlideStorage(storage_path=storage_path)
+
+    # Load active sessions from database
+    if database_url:
+        await session_manager.load_active_sessions()
 
     # Rate limiter: 100 requests per minute per IP
     rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
@@ -119,6 +131,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down SeenSlide Cloud Server")
+    await close_db()
 
 
 def create_cloud_app() -> FastAPI:
@@ -196,7 +209,7 @@ def create_cloud_app() -> FastAPI:
                 )
 
             # Create session
-            session = session_manager.create_session(
+            session = await session_manager.create_session(
                 presenter_name=body.presenter_name,
                 presenter_email=body.presenter_email or "",
                 max_slides=body.max_slides,
@@ -204,6 +217,9 @@ def create_cloud_app() -> FastAPI:
                 is_private=body.is_private,
                 password=body.password
             )
+
+            # Save session to database
+            await session_manager.save_session(session)
 
             logger.info(
                 f"Session created: {session.session_id} "
@@ -255,7 +271,7 @@ def create_cloud_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid session ID format")
 
         # Get session
-        session = session_manager.get_session(session_id)
+        session = await session_manager.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
@@ -296,7 +312,7 @@ def create_cloud_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid session ID format")
 
         # End session
-        if not session_manager.end_session(session_id):
+        if not await session_manager.end_session(session_id):
             raise HTTPException(status_code=404, detail="Session not found")
 
         logger.info(f"Session ended: {session_id}")
@@ -399,7 +415,7 @@ def create_cloud_app() -> FastAPI:
 
         try:
             # Save slide
-            slide = slide_storage.save_slide(
+            slide = await slide_storage.save_slide(
                 session_id=session_id,
                 slide_number=slide_number,
                 image_data=contents,
@@ -407,7 +423,7 @@ def create_cloud_app() -> FastAPI:
             )
 
             # Increment session slide count
-            session_manager.increment_slide_count(session_id)
+            await session_manager.increment_slide_count(session_id)
 
             logger.info(f"Slide uploaded: {session_id}/slide_{slide_number}")
 
@@ -454,12 +470,12 @@ def create_cloud_app() -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid session ID format")
 
         # Get session
-        session = session_manager.get_session(session_id)
+        session = await session_manager.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
         # Get slides
-        slides = slide_storage.list_slides(session_id)
+        slides = await slide_storage.list_slides(session_id)
 
         return SlideListResponse(
             session_id=session_id,

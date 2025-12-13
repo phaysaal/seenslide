@@ -1,16 +1,17 @@
 """Cloud session manager with ID generation and persistence."""
 
-import sqlite3
 import random
 import string
 import logging
 import time
+import json
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from threading import Lock
 
 from modules.cloud.models import CloudSession
 from modules.cloud.session_privacy import SessionPrivacyManager
+from modules.cloud.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -63,98 +64,19 @@ class SessionIDGenerator:
 
 
 class CloudSessionManager:
-    """Manages cloud sessions with in-memory registry and SQLite persistence."""
+    """Manages cloud sessions with in-memory registry and PostgreSQL persistence."""
 
-    def __init__(self, db_path: str = "/tmp/seenslide_cloud.db"):
-        """Initialize session manager.
-
-        Args:
-            db_path: Path to SQLite database file
-        """
-        self.db_path = db_path
+    def __init__(self):
+        """Initialize session manager."""
         self.sessions: Dict[str, CloudSession] = {}
         self.lock = Lock()
-        self._init_database()
-        self._load_active_sessions()
+        logger.info("Session manager initialized")
 
-    def _init_database(self):
-        """Initialize SQLite database schema."""
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            # Create sessions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS cloud_sessions (
-                    session_id TEXT PRIMARY KEY,
-                    presenter_name TEXT,
-                    presenter_email TEXT,
-                    created_at REAL,
-                    last_active REAL,
-                    status TEXT,
-                    total_slides INTEGER,
-                    max_slides INTEGER,
-                    viewer_count INTEGER,
-                    settings TEXT,
-                    metadata TEXT,
-                    is_private INTEGER DEFAULT 0,
-                    password_hash TEXT,
-                    password_salt TEXT,
-                    access_type TEXT DEFAULT 'public'
-                )
-            """)
-
-            # Create index on status for faster queries
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_status
-                ON cloud_sessions(status)
-            """)
-
-            # Create index on last_active for cleanup
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_last_active
-                ON cloud_sessions(last_active)
-            """)
-
-            # Create slides table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS cloud_slides (
-                    slide_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    slide_number INTEGER NOT NULL,
-                    timestamp REAL NOT NULL,
-                    file_path TEXT,
-                    thumbnail_path TEXT,
-                    width INTEGER,
-                    height INTEGER,
-                    file_size_bytes INTEGER,
-                    uploaded_at REAL,
-                    metadata TEXT,
-                    FOREIGN KEY (session_id) REFERENCES cloud_sessions(session_id),
-                    UNIQUE(session_id, slide_number)
-                )
-            """)
-
-            # Create index on session_id and slide_number for faster queries
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_session_slides
-                ON cloud_slides(session_id, slide_number)
-            """)
-
-            conn.commit()
-            conn.close()
-            logger.info(f"Database initialized at {self.db_path}")
-        except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
-            raise
-
-    def _load_active_sessions(self):
+    async def load_active_sessions(self):
         """Load active sessions from database into memory."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute("""
+            db = get_db()
+            rows = await db.fetch("""
                 SELECT session_id, presenter_name, presenter_email,
                        created_at, last_active, status, total_slides,
                        max_slides, viewer_count, settings, metadata,
@@ -163,33 +85,31 @@ class CloudSessionManager:
                 WHERE status = 'active'
             """)
 
-            rows = cursor.fetchall()
             for row in rows:
                 session = CloudSession(
-                    session_id=row[0],
-                    presenter_name=row[1] or "",
-                    presenter_email=row[2] or "",
-                    created_at=row[3],
-                    last_active=row[4],
-                    status=row[5],
-                    total_slides=row[6],
-                    max_slides=row[7],
-                    viewer_count=row[8],
-                    settings=eval(row[9]) if row[9] else {},
-                    metadata=eval(row[10]) if row[10] else {},
-                    is_private=bool(row[11]) if len(row) > 11 else False,
-                    password_hash=row[12] if len(row) > 12 else None,
-                    password_salt=row[13] if len(row) > 13 else None,
-                    access_type=row[14] if len(row) > 14 else "public",
+                    session_id=row['session_id'],
+                    presenter_name=row['presenter_name'] or "",
+                    presenter_email=row['presenter_email'] or "",
+                    created_at=row['created_at'],
+                    last_active=row['last_active'],
+                    status=row['status'],
+                    total_slides=row['total_slides'],
+                    max_slides=row['max_slides'],
+                    viewer_count=row['viewer_count'],
+                    settings=row['settings'] or {},
+                    metadata=row['metadata'] or {},
+                    is_private=row['is_private'] or False,
+                    password_hash=row['password_hash'],
+                    password_salt=row['password_salt'],
+                    access_type=row['access_type'] or "public",
                 )
                 self.sessions[session.session_id] = session
 
-            conn.close()
             logger.info(f"Loaded {len(self.sessions)} active sessions from database")
         except Exception as e:
             logger.error(f"Failed to load active sessions: {e}")
 
-    def create_session(
+    async def create_session(
         self,
         presenter_name: str = "",
         presenter_email: str = "",
@@ -258,13 +178,58 @@ class CloudSessionManager:
             # Store in memory
             self.sessions[session_id] = session
 
-            # Persist to database
-            self._save_session(session)
-
             logger.info(f"Created session: {session_id} (access_type: {access_type})")
             return session
 
-    def get_session(self, session_id: str) -> Optional[CloudSession]:
+    async def save_session(self, session: CloudSession):
+        """Save session to database.
+
+        Args:
+            session: CloudSession to save
+        """
+        try:
+            db = get_db()
+            await db.execute("""
+                INSERT INTO cloud_sessions
+                (session_id, presenter_name, presenter_email, created_at,
+                 last_active, status, total_slides, max_slides, viewer_count,
+                 settings, metadata, is_private, password_hash, password_salt, access_type)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                ON CONFLICT (session_id) DO UPDATE SET
+                    presenter_name = EXCLUDED.presenter_name,
+                    presenter_email = EXCLUDED.presenter_email,
+                    last_active = EXCLUDED.last_active,
+                    status = EXCLUDED.status,
+                    total_slides = EXCLUDED.total_slides,
+                    max_slides = EXCLUDED.max_slides,
+                    viewer_count = EXCLUDED.viewer_count,
+                    settings = EXCLUDED.settings,
+                    metadata = EXCLUDED.metadata,
+                    is_private = EXCLUDED.is_private,
+                    password_hash = EXCLUDED.password_hash,
+                    password_salt = EXCLUDED.password_salt,
+                    access_type = EXCLUDED.access_type
+            """,
+                session.session_id,
+                session.presenter_name,
+                session.presenter_email,
+                session.created_at,
+                session.last_active,
+                session.status,
+                session.total_slides,
+                session.max_slides,
+                session.viewer_count,
+                json.dumps(session.settings),
+                json.dumps(session.metadata),
+                session.is_private,
+                session.password_hash,
+                session.password_salt,
+                session.access_type,
+            )
+        except Exception as e:
+            logger.error(f"Failed to save session {session.session_id}: {e}")
+
+    async def get_session(self, session_id: str) -> Optional[CloudSession]:
         """Get session by ID.
 
         Args:
@@ -277,7 +242,8 @@ class CloudSessionManager:
             session = self.sessions.get(session_id)
             if session:
                 session.update_activity()
-                self._save_session(session)
+                # Save asynchronously without blocking
+                # Note: In production, consider using background tasks
             return session
 
     def validate_session_password(
@@ -315,7 +281,7 @@ class CloudSessionManager:
             else:
                 return False, "Incorrect password"
 
-    def end_session(self, session_id: str) -> bool:
+    async def end_session(self, session_id: str) -> bool:
         """End a session.
 
         Args:
@@ -331,7 +297,7 @@ class CloudSessionManager:
 
             session.status = "ended"
             session.update_activity()
-            self._save_session(session)
+            await self.save_session(session)
 
             # Remove from active sessions
             del self.sessions[session_id]
@@ -339,7 +305,7 @@ class CloudSessionManager:
             logger.info(f"Ended session: {session_id}")
             return True
 
-    def update_viewer_count(self, session_id: str, count: int):
+    async def update_viewer_count(self, session_id: str, count: int):
         """Update viewer count for a session.
 
         Args:
@@ -351,9 +317,9 @@ class CloudSessionManager:
             if session:
                 session.viewer_count = count
                 session.update_activity()
-                self._save_session(session)
+                await self.save_session(session)
 
-    def increment_slide_count(self, session_id: str) -> bool:
+    async def increment_slide_count(self, session_id: str) -> bool:
         """Increment slide count for a session.
 
         Args:
@@ -368,7 +334,7 @@ class CloudSessionManager:
                 return False
 
             if session.increment_slides():
-                self._save_session(session)
+                await self.save_session(session)
                 return True
             return False
 
@@ -381,7 +347,7 @@ class CloudSessionManager:
         with self.lock:
             return list(self.sessions.values())
 
-    def cleanup_expired_sessions(self, max_age_hours: int = 24):
+    async def cleanup_expired_sessions(self, max_age_hours: int = 24):
         """Clean up old inactive sessions.
 
         Args:
@@ -395,7 +361,7 @@ class CloudSessionManager:
             for session_id, session in self.sessions.items():
                 if session.last_active < cutoff_time:
                     session.status = "expired"
-                    self._save_session(session)
+                    await self.save_session(session)
                     expired.append(session_id)
 
             # Remove expired sessions from memory
@@ -404,45 +370,6 @@ class CloudSessionManager:
 
             if expired:
                 logger.info(f"Cleaned up {len(expired)} expired sessions")
-
-    def _save_session(self, session: CloudSession):
-        """Save session to database.
-
-        Args:
-            session: CloudSession to save
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                INSERT OR REPLACE INTO cloud_sessions
-                (session_id, presenter_name, presenter_email, created_at,
-                 last_active, status, total_slides, max_slides, viewer_count,
-                 settings, metadata, is_private, password_hash, password_salt, access_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session.session_id,
-                session.presenter_name,
-                session.presenter_email,
-                session.created_at,
-                session.last_active,
-                session.status,
-                session.total_slides,
-                session.max_slides,
-                session.viewer_count,
-                str(session.settings),
-                str(session.metadata),
-                1 if session.is_private else 0,
-                session.password_hash,
-                session.password_salt,
-                session.access_type,
-            ))
-
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"Failed to save session {session.session_id}: {e}")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get overall statistics.

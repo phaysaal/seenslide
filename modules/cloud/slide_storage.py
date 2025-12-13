@@ -1,17 +1,18 @@
 """Cloud slide storage manager."""
 
-import sqlite3
 import logging
 import time
 import uuid
 import os
+import json
 from pathlib import Path
-from typing import Optional, List, BinaryIO
+from typing import Optional, List
 from threading import Lock
 from PIL import Image
 import io
 
 from modules.cloud.models import CloudSlide
+from modules.cloud.database import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +22,13 @@ class CloudSlideStorage:
 
     def __init__(
         self,
-        db_path: str = "/tmp/seenslide_cloud.db",
         storage_path: str = "/tmp/seenslide_slides"
     ):
         """Initialize slide storage.
 
         Args:
-            db_path: Path to SQLite database
             storage_path: Base path for slide file storage
         """
-        self.db_path = db_path
         self.storage_path = Path(storage_path)
         self.lock = Lock()
 
@@ -41,7 +39,7 @@ class CloudSlideStorage:
 
         logger.info(f"Slide storage initialized at {self.storage_path}")
 
-    def save_slide(
+    async def save_slide(
         self,
         session_id: str,
         slide_number: int,
@@ -101,7 +99,7 @@ class CloudSlideStorage:
                 )
 
                 # Save to database
-                self._save_slide_to_db(slide)
+                await self._save_slide_to_db(slide)
 
                 logger.info(
                     f"Saved slide {slide_number} for session {session_id} "
@@ -145,23 +143,31 @@ class CloudSlideStorage:
             logger.warning(f"Failed to generate thumbnail: {e}")
             return None
 
-    def _save_slide_to_db(self, slide: CloudSlide):
+    async def _save_slide_to_db(self, slide: CloudSlide):
         """Save slide metadata to database.
 
         Args:
             slide: CloudSlide to save
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                INSERT OR REPLACE INTO cloud_slides
+            db = get_db()
+            await db.execute("""
+                INSERT INTO cloud_slides
                 (slide_id, session_id, slide_number, timestamp,
                  file_path, thumbnail_path, width, height,
                  file_size_bytes, uploaded_at, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ON CONFLICT (session_id, slide_number) DO UPDATE SET
+                    slide_id = EXCLUDED.slide_id,
+                    timestamp = EXCLUDED.timestamp,
+                    file_path = EXCLUDED.file_path,
+                    thumbnail_path = EXCLUDED.thumbnail_path,
+                    width = EXCLUDED.width,
+                    height = EXCLUDED.height,
+                    file_size_bytes = EXCLUDED.file_size_bytes,
+                    uploaded_at = EXCLUDED.uploaded_at,
+                    metadata = EXCLUDED.metadata
+            """,
                 slide.slide_id,
                 slide.session_id,
                 slide.slide_number,
@@ -172,16 +178,13 @@ class CloudSlideStorage:
                 slide.height,
                 slide.file_size_bytes,
                 slide.uploaded_at,
-                str(slide.metadata),
-            ))
-
-            conn.commit()
-            conn.close()
+                json.dumps(slide.metadata),
+            )
         except Exception as e:
             logger.error(f"Failed to save slide to database: {e}")
             raise
 
-    def get_slide(self, session_id: str, slide_number: int) -> Optional[CloudSlide]:
+    async def get_slide(self, session_id: str, slide_number: int) -> Optional[CloudSlide]:
         """Get slide metadata from database.
 
         Args:
@@ -192,41 +195,36 @@ class CloudSlideStorage:
             CloudSlide if found, None otherwise
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute("""
+            db = get_db()
+            row = await db.fetchrow("""
                 SELECT slide_id, session_id, slide_number, timestamp,
                        file_path, thumbnail_path, width, height,
                        file_size_bytes, uploaded_at, metadata
                 FROM cloud_slides
-                WHERE session_id = ? AND slide_number = ?
-            """, (session_id, slide_number))
-
-            row = cursor.fetchone()
-            conn.close()
+                WHERE session_id = $1 AND slide_number = $2
+            """, session_id, slide_number)
 
             if not row:
                 return None
 
             return CloudSlide(
-                slide_id=row[0],
-                session_id=row[1],
-                slide_number=row[2],
-                timestamp=row[3],
-                file_path=row[4],
-                thumbnail_path=row[5],
-                width=row[6],
-                height=row[7],
-                file_size_bytes=row[8],
-                uploaded_at=row[9],
-                metadata=eval(row[10]) if row[10] else {},
+                slide_id=row['slide_id'],
+                session_id=row['session_id'],
+                slide_number=row['slide_number'],
+                timestamp=row['timestamp'],
+                file_path=row['file_path'],
+                thumbnail_path=row['thumbnail_path'],
+                width=row['width'],
+                height=row['height'],
+                file_size_bytes=row['file_size_bytes'],
+                uploaded_at=row['uploaded_at'],
+                metadata=row['metadata'] or {},
             )
         except Exception as e:
             logger.error(f"Failed to get slide: {e}")
             return None
 
-    def list_slides(self, session_id: str) -> List[CloudSlide]:
+    async def list_slides(self, session_id: str) -> List[CloudSlide]:
         """List all slides for a session.
 
         Args:
@@ -236,35 +234,30 @@ class CloudSlideStorage:
             List of CloudSlide instances, ordered by slide_number
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute("""
+            db = get_db()
+            rows = await db.fetch("""
                 SELECT slide_id, session_id, slide_number, timestamp,
                        file_path, thumbnail_path, width, height,
                        file_size_bytes, uploaded_at, metadata
                 FROM cloud_slides
-                WHERE session_id = ?
+                WHERE session_id = $1
                 ORDER BY slide_number ASC
-            """, (session_id,))
-
-            rows = cursor.fetchall()
-            conn.close()
+            """, session_id)
 
             slides = []
             for row in rows:
                 slides.append(CloudSlide(
-                    slide_id=row[0],
-                    session_id=row[1],
-                    slide_number=row[2],
-                    timestamp=row[3],
-                    file_path=row[4],
-                    thumbnail_path=row[5],
-                    width=row[6],
-                    height=row[7],
-                    file_size_bytes=row[8],
-                    uploaded_at=row[9],
-                    metadata=eval(row[10]) if row[10] else {},
+                    slide_id=row['slide_id'],
+                    session_id=row['session_id'],
+                    slide_number=row['slide_number'],
+                    timestamp=row['timestamp'],
+                    file_path=row['file_path'],
+                    thumbnail_path=row['thumbnail_path'],
+                    width=row['width'],
+                    height=row['height'],
+                    file_size_bytes=row['file_size_bytes'],
+                    uploaded_at=row['uploaded_at'],
+                    metadata=row['metadata'] or {},
                 ))
 
             return slides
@@ -282,12 +275,13 @@ class CloudSlideStorage:
         Returns:
             Image bytes if found, None otherwise
         """
-        slide = self.get_slide(session_id, slide_number)
-        if not slide or not slide.file_path:
+        file_path = self.storage_path / "slides" / session_id / f"slide_{slide_number}.png"
+
+        if not file_path.exists():
             return None
 
         try:
-            with open(slide.file_path, 'rb') as f:
+            with open(file_path, 'rb') as f:
                 return f.read()
         except Exception as e:
             logger.error(f"Failed to read slide file: {e}")
@@ -305,18 +299,19 @@ class CloudSlideStorage:
         Returns:
             Thumbnail bytes if found, None otherwise
         """
-        slide = self.get_slide(session_id, slide_number)
-        if not slide or not slide.thumbnail_path:
+        thumb_path = self.storage_path / "thumbnails" / session_id / f"thumb_{slide_number}.jpg"
+
+        if not thumb_path.exists():
             return None
 
         try:
-            with open(slide.thumbnail_path, 'rb') as f:
+            with open(thumb_path, 'rb') as f:
                 return f.read()
         except Exception as e:
             logger.error(f"Failed to read thumbnail file: {e}")
             return None
 
-    def delete_slide(self, session_id: str, slide_number: int) -> bool:
+    async def delete_slide(self, session_id: str, slide_number: int) -> bool:
         """Delete a slide and its files.
 
         Args:
@@ -327,7 +322,7 @@ class CloudSlideStorage:
             True if deleted, False if not found
         """
         with self.lock:
-            slide = self.get_slide(session_id, slide_number)
+            slide = await self.get_slide(session_id, slide_number)
             if not slide:
                 return False
 
@@ -339,14 +334,11 @@ class CloudSlideStorage:
                     os.remove(slide.thumbnail_path)
 
                 # Delete from database
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                cursor.execute("""
+                db = get_db()
+                await db.execute("""
                     DELETE FROM cloud_slides
-                    WHERE session_id = ? AND slide_number = ?
-                """, (session_id, slide_number))
-                conn.commit()
-                conn.close()
+                    WHERE session_id = $1 AND slide_number = $2
+                """, session_id, slide_number)
 
                 logger.info(f"Deleted slide {slide_number} from session {session_id}")
                 return True
