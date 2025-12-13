@@ -104,10 +104,17 @@ async def lifespan(app: FastAPI):
     # Initialize database connection
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        logger.info("Initializing PostgreSQL database...")
-        await init_db(database_url, run_migrations=True)
+        logger.info(f"Initializing PostgreSQL database... (URL starts with: {database_url[:20]}...)")
+        try:
+            await init_db(database_url, run_migrations=True)
+            logger.info("Database initialization completed successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}", exc_info=True)
+            raise
     else:
-        logger.warning("DATABASE_URL not set, database will not be initialized")
+        logger.error("CRITICAL: DATABASE_URL environment variable is not set!")
+        logger.error("Database will NOT be initialized. Slide uploads and other features will fail.")
+        # Don't raise error here to allow server to start, but log prominently
 
     # Initialize managers
     storage_path = os.getenv("SEENSLIDE_STORAGE_PATH", "/tmp/seenslide_slides")
