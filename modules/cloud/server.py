@@ -13,6 +13,7 @@ import os
 
 from modules.cloud.session_manager import CloudSessionManager, SessionIDGenerator
 from modules.cloud.slide_storage import CloudSlideStorage
+from modules.cloud.pdf_generator import SlidePDFGenerator
 from modules.cloud.database import init_db, close_db
 from modules.cloud.security import (
     RateLimiter,
@@ -86,6 +87,21 @@ class SlideListResponse(BaseModel):
     slides: list[SlideResponse]
 
 
+class GeneratePDFRequest(BaseModel):
+    """Request model for PDF generation."""
+    slide_numbers: Optional[list[int]] = Field(None, description="Specific slide numbers to include (if None, include all)")
+    add_watermark: bool = Field(False, description="Add SeenSlide watermark")
+
+
+class GeneratePDFResponse(BaseModel):
+    """Response model for PDF generation."""
+    pdf_id: str
+    session_id: str
+    total_slides: int
+    file_size_bytes: int
+    download_url: str
+
+
 # Global instances
 session_manager: CloudSessionManager = None
 slide_storage: CloudSlideStorage = None
@@ -118,9 +134,11 @@ async def lifespan(app: FastAPI):
 
     # Initialize managers
     storage_path = os.getenv("SEENSLIDE_STORAGE_PATH", "/tmp/seenslide_slides")
+    pdf_storage_path = os.getenv("SEENSLIDE_PDF_PATH", "/tmp/seenslide_pdfs")
 
     session_manager = CloudSessionManager()
     slide_storage = CloudSlideStorage(storage_path=storage_path)
+    pdf_generator = SlidePDFGenerator(storage_path=pdf_storage_path)
 
     # Load active sessions from database
     if database_url:
@@ -551,6 +569,180 @@ def create_cloud_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Thumbnail not found")
 
         return Response(content=image_data, media_type="image/jpeg")
+
+    @app.get(
+        "/api/cloud/session/{session_id}/download-slide/{slide_number}",
+        responses={
+            404: {"model": ErrorResponse, "description": "Slide not found"},
+            400: {"model": ErrorResponse, "description": "Invalid session ID"}
+        }
+    )
+    @limiter.limit("60/minute")
+    async def download_slide(request: Request, session_id: str, slide_number: int):
+        """Download a single slide as PNG file.
+
+        Args:
+            session_id: The session ID
+            slide_number: Slide number
+
+        Returns:
+            Slide image file as download
+
+        Rate limit: 60 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get session
+        session = await session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Get slide file
+        image_data = slide_storage.get_slide_file(session_id, slide_number)
+        if not image_data:
+            raise HTTPException(status_code=404, detail="Slide not found")
+
+        # Return as downloadable file
+        return Response(
+            content=image_data,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f"attachment; filename=slide_{slide_number}.png"
+            }
+        )
+
+    @app.post(
+        "/api/cloud/session/{session_id}/generate-pdf",
+        response_model=GeneratePDFResponse,
+        responses={
+            404: {"model": ErrorResponse, "description": "Session not found"},
+            400: {"model": ErrorResponse, "description": "Invalid request"}
+        }
+    )
+    @limiter.limit("10/minute")
+    async def generate_pdf(
+        request: Request,
+        session_id: str,
+        pdf_request: GeneratePDFRequest
+    ):
+        """Generate PDF from session slides.
+
+        Args:
+            session_id: The session ID
+            pdf_request: PDF generation parameters
+
+        Returns:
+            PDF generation response with download URL
+
+        Rate limit: 10 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get session
+        session = await session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        try:
+            # Get slides to include
+            all_slides = await slide_storage.list_slides(session_id)
+            if not all_slides:
+                raise HTTPException(status_code=400, detail="No slides available in session")
+
+            # Filter slides if specific numbers requested
+            if pdf_request.slide_numbers:
+                slides_to_include = [
+                    s for s in all_slides
+                    if s.slide_number in pdf_request.slide_numbers
+                ]
+                if not slides_to_include:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="None of the requested slides found"
+                    )
+            else:
+                slides_to_include = all_slides
+
+            # Prepare session info for PDF metadata
+            session_info = {
+                "session_id": session.session_id,
+                "presenter_name": session.presenter_name,
+                "created_at": session.created_at
+            }
+
+            # Generate PDF
+            pdf_id, pdf_bytes = pdf_generator.generate_pdf(
+                slides=slides_to_include,
+                session_info=session_info,
+                add_watermark=pdf_request.add_watermark
+            )
+
+            logger.info(
+                f"Generated PDF {pdf_id} for session {session_id} "
+                f"with {len(slides_to_include)} slides"
+            )
+
+            return GeneratePDFResponse(
+                pdf_id=pdf_id,
+                session_id=session_id,
+                total_slides=len(slides_to_include),
+                file_size_bytes=len(pdf_bytes),
+                download_url=f"/api/cloud/session/{session_id}/pdf/{pdf_id}"
+            )
+
+        except ValueError as e:
+            logger.error(f"Failed to generate PDF: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Unexpected error generating PDF: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    @app.get(
+        "/api/cloud/session/{session_id}/pdf/{pdf_id}",
+        responses={
+            404: {"model": ErrorResponse, "description": "PDF not found"},
+            400: {"model": ErrorResponse, "description": "Invalid session ID"}
+        }
+    )
+    @limiter.limit("60/minute")
+    async def download_pdf(request: Request, session_id: str, pdf_id: str):
+        """Download generated PDF file.
+
+        Args:
+            session_id: The session ID
+            pdf_id: PDF identifier from generate-pdf endpoint
+
+        Returns:
+            PDF file as download
+
+        Rate limit: 60 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get session
+        session = await session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Get PDF file
+        pdf_data = pdf_generator.get_pdf_file(pdf_id)
+        if not pdf_data:
+            raise HTTPException(status_code=404, detail="PDF not found or expired")
+
+        # Return as downloadable file
+        return Response(
+            content=pdf_data,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename=presentation_{session_id}.pdf"
+            }
+        )
 
     @app.get("/api/cloud/sessions")
     @limiter.limit("20/minute")

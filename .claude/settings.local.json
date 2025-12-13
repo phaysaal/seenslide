@@ -23,7 +23,12 @@
       "Bash(timeout 8 venv_portal/bin/python:*)",
       "Bash(timeout 10 venv_portal/bin/python:*)",
       "Bash(curl:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(PYTHONPATH=/home/faisal/code/hobby/SeenSlide python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

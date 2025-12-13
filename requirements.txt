@@ -21,5 +21,8 @@ psycopg2-binary>=2.9.0
 # Image Processing
 Pillow>=10.0.0
 
+# PDF Generation
+reportlab>=4.0.0
+
 # Utilities
 python-dateutil>=2.8.2
