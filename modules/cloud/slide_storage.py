@@ -5,9 +5,9 @@ import time
 import uuid
 import os
 import json
+import asyncio
 from pathlib import Path
 from typing import Optional, List
-from threading import Lock
 from PIL import Image
 import io
 
@@ -30,7 +30,7 @@ class CloudSlideStorage:
             storage_path: Base path for slide file storage
         """
         self.storage_path = Path(storage_path)
-        self.lock = Lock()
+        self.lock = asyncio.Lock()
 
         # Create storage directories
         self.storage_path.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ class CloudSlideStorage:
         Raises:
             ValueError: If image is invalid or save fails
         """
-        with self.lock:
+        async with self.lock:
             try:
                 # Generate unique slide ID
                 slide_id = str(uuid.uuid4())
@@ -321,7 +321,7 @@ class CloudSlideStorage:
         Returns:
             True if deleted, False if not found
         """
-        with self.lock:
+        async with self.lock:
             slide = await self.get_slide(session_id, slide_number)
             if not slide:
                 return False
