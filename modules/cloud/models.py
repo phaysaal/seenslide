@@ -22,6 +22,10 @@ class CloudSession:
         viewer_count: Current number of connected viewers
         settings: Session settings (capture interval, etc.)
         metadata: Additional metadata
+        is_private: Whether session is private (requires password)
+        password_hash: Hashed password for private sessions
+        password_salt: Salt used for password hashing
+        access_type: Type of access control (public, private, password_protected)
     """
     session_id: str
     presenter_name: str = ""
@@ -34,6 +38,10 @@ class CloudSession:
     viewer_count: int = 0
     settings: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    is_private: bool = False
+    password_hash: Optional[str] = None
+    password_salt: Optional[str] = None
+    access_type: str = "public"  # public, private, password_protected
 
     def is_active(self) -> bool:
         """Check if session is currently active."""
@@ -69,6 +77,24 @@ class CloudSession:
             "viewer_count": self.viewer_count,
             "settings": self.settings,
             "metadata": self.metadata,
+            "is_private": self.is_private,
+            "password_hash": self.password_hash,
+            "password_salt": self.password_salt,
+            "access_type": self.access_type,
+        }
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for public API (excludes sensitive data)."""
+        return {
+            "session_id": self.session_id,
+            "presenter_name": self.presenter_name,
+            "created_at": self.created_at,
+            "status": self.status,
+            "total_slides": self.total_slides,
+            "max_slides": self.max_slides,
+            "viewer_count": self.viewer_count,
+            "is_private": self.is_private,
+            "access_type": self.access_type,
         }
 
     @classmethod
@@ -86,6 +112,10 @@ class CloudSession:
             viewer_count=data.get("viewer_count", 0),
             settings=data.get("settings", {}),
             metadata=data.get("metadata", {}),
+            is_private=data.get("is_private", False),
+            password_hash=data.get("password_hash"),
+            password_salt=data.get("password_salt"),
+            access_type=data.get("access_type", "public"),
         )
 
 

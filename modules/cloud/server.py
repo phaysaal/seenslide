@@ -29,6 +29,8 @@ class CreateSessionRequest(BaseModel):
     presenter_email: Optional[str] = Field(None, max_length=100)
     max_slides: int = Field(50, ge=1, le=100)
     settings: Dict[str, Any] = Field(default_factory=dict)
+    is_private: bool = Field(False, description="Whether session is private")
+    password: Optional[str] = Field(None, min_length=6, max_length=128, description="Password for session protection")
 
 
 class SessionResponse(BaseModel):
@@ -40,6 +42,19 @@ class SessionResponse(BaseModel):
     total_slides: int
     max_slides: int
     viewer_count: int
+    is_private: bool
+    access_type: str
+
+
+class VerifyPasswordRequest(BaseModel):
+    """Request model for verifying session password."""
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class VerifyPasswordResponse(BaseModel):
+    """Response model for password verification."""
+    valid: bool
+    message: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):
@@ -159,12 +174,15 @@ def create_cloud_app() -> FastAPI:
                 presenter_name=body.presenter_name,
                 presenter_email=body.presenter_email or "",
                 max_slides=body.max_slides,
-                settings=body.settings
+                settings=body.settings,
+                is_private=body.is_private,
+                password=body.password
             )
 
             logger.info(
                 f"Session created: {session.session_id} "
-                f"by {body.presenter_name} from {client_ip}"
+                f"by {body.presenter_name} from {client_ip} "
+                f"(access_type: {session.access_type})"
             )
 
             return SessionResponse(
@@ -174,7 +192,9 @@ def create_cloud_app() -> FastAPI:
                 status=session.status,
                 total_slides=session.total_slides,
                 max_slides=session.max_slides,
-                viewer_count=session.viewer_count
+                viewer_count=session.viewer_count,
+                is_private=session.is_private,
+                access_type=session.access_type
             )
 
         except ValueError as e:
@@ -220,7 +240,9 @@ def create_cloud_app() -> FastAPI:
             status=session.status,
             total_slides=session.total_slides,
             max_slides=session.max_slides,
-            viewer_count=session.viewer_count
+            viewer_count=session.viewer_count,
+            is_private=session.is_private,
+            access_type=session.access_type
         )
 
     @app.delete(
@@ -254,6 +276,48 @@ def create_cloud_app() -> FastAPI:
         logger.info(f"Session ended: {session_id}")
         return {"message": "Session ended successfully", "session_id": session_id}
 
+    @app.post(
+        "/api/cloud/session/{session_id}/verify-password",
+        response_model=VerifyPasswordResponse,
+        responses={
+            404: {"model": ErrorResponse, "description": "Session not found"},
+            400: {"model": ErrorResponse, "description": "Invalid session ID"}
+        }
+    )
+    @limiter.limit("30/minute")
+    async def verify_session_password(
+        request: Request,
+        session_id: str,
+        body: VerifyPasswordRequest
+    ):
+        """Verify password for a session.
+
+        Args:
+            session_id: The session ID
+            body: Password verification request
+
+        Returns:
+            Verification result
+
+        Rate limit: 30 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Validate password
+        is_valid, error_message = session_manager.validate_session_password(
+            session_id, body.password
+        )
+
+        if not is_valid and error_message == "Session not found":
+            raise HTTPException(status_code=404, detail=error_message)
+
+        return VerifyPasswordResponse(
+            valid=is_valid,
+            message=error_message if not is_valid else "Password verified"
+        )
+
     @app.get("/api/cloud/sessions")
     @limiter.limit("20/minute")
     async def list_sessions(request: Request):
@@ -273,7 +337,9 @@ def create_cloud_app() -> FastAPI:
                     status=s.status,
                     total_slides=s.total_slides,
                     max_slides=s.max_slides,
-                    viewer_count=s.viewer_count
+                    viewer_count=s.viewer_count,
+                    is_private=s.is_private,
+                    access_type=s.access_type
                 )
                 for s in sessions
             ]

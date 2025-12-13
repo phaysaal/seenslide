@@ -10,6 +10,7 @@ from pathlib import Path
 from threading import Lock
 
 from modules.cloud.models import CloudSession
+from modules.cloud.session_privacy import SessionPrivacyManager
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,11 @@ class CloudSessionManager:
                     max_slides INTEGER,
                     viewer_count INTEGER,
                     settings TEXT,
-                    metadata TEXT
+                    metadata TEXT,
+                    is_private INTEGER DEFAULT 0,
+                    password_hash TEXT,
+                    password_salt TEXT,
+                    access_type TEXT DEFAULT 'public'
                 )
             """)
 
@@ -127,7 +132,8 @@ class CloudSessionManager:
             cursor.execute("""
                 SELECT session_id, presenter_name, presenter_email,
                        created_at, last_active, status, total_slides,
-                       max_slides, viewer_count, settings, metadata
+                       max_slides, viewer_count, settings, metadata,
+                       is_private, password_hash, password_salt, access_type
                 FROM cloud_sessions
                 WHERE status = 'active'
             """)
@@ -146,6 +152,10 @@ class CloudSessionManager:
                     viewer_count=row[8],
                     settings=eval(row[9]) if row[9] else {},
                     metadata=eval(row[10]) if row[10] else {},
+                    is_private=bool(row[11]) if len(row) > 11 else False,
+                    password_hash=row[12] if len(row) > 12 else None,
+                    password_salt=row[13] if len(row) > 13 else None,
+                    access_type=row[14] if len(row) > 14 else "public",
                 )
                 self.sessions[session.session_id] = session
 
@@ -159,7 +169,9 @@ class CloudSessionManager:
         presenter_name: str = "",
         presenter_email: str = "",
         max_slides: int = 50,
-        settings: Dict[str, Any] = None
+        settings: Dict[str, Any] = None,
+        is_private: bool = False,
+        password: Optional[str] = None
     ) -> CloudSession:
         """Create a new cloud session.
 
@@ -168,14 +180,30 @@ class CloudSessionManager:
             presenter_email: Email of the presenter
             max_slides: Maximum allowed slides
             settings: Session settings
+            is_private: Whether session is private
+            password: Optional password for session protection
 
         Returns:
             Created CloudSession instance
 
         Raises:
-            ValueError: If failed to generate unique ID after retries
+            ValueError: If failed to generate unique ID or invalid password
         """
         with self.lock:
+            # Validate password if provided
+            password_hash = None
+            password_salt = None
+            if password:
+                is_valid, error = SessionPrivacyManager.validate_password_strength(password)
+                if not is_valid:
+                    raise ValueError(f"Invalid password: {error}")
+                password_hash, password_salt = SessionPrivacyManager.hash_password(password)
+
+            # Determine access type
+            access_type = SessionPrivacyManager.determine_access_type(
+                is_private, password is not None
+            )
+
             # Generate unique session ID
             max_retries = 10
             session_id = None
@@ -196,6 +224,10 @@ class CloudSessionManager:
                 presenter_email=presenter_email,
                 max_slides=max_slides,
                 settings=settings or {},
+                is_private=is_private,
+                password_hash=password_hash,
+                password_salt=password_salt,
+                access_type=access_type,
             )
 
             # Store in memory
@@ -204,7 +236,7 @@ class CloudSessionManager:
             # Persist to database
             self._save_session(session)
 
-            logger.info(f"Created session: {session_id}")
+            logger.info(f"Created session: {session_id} (access_type: {access_type})")
             return session
 
     def get_session(self, session_id: str) -> Optional[CloudSession]:
@@ -222,6 +254,41 @@ class CloudSessionManager:
                 session.update_activity()
                 self._save_session(session)
             return session
+
+    def validate_session_password(
+        self, session_id: str, password: str
+    ) -> tuple[bool, Optional[str]]:
+        """Validate password for a session.
+
+        Args:
+            session_id: Session ID to validate password for
+            password: Password to validate
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if not session:
+                return False, "Session not found"
+
+            if session.access_type == "public":
+                return True, None
+
+            if session.access_type != "password_protected":
+                return False, "Session does not use password protection"
+
+            if not session.password_hash or not session.password_salt:
+                logger.error(f"Session {session_id} missing password hash/salt")
+                return False, "Session configuration error"
+
+            # Verify password
+            if SessionPrivacyManager.verify_password(
+                password, session.password_hash, session.password_salt
+            ):
+                return True, None
+            else:
+                return False, "Incorrect password"
 
     def end_session(self, session_id: str) -> bool:
         """End a session.
@@ -327,8 +394,8 @@ class CloudSessionManager:
                 INSERT OR REPLACE INTO cloud_sessions
                 (session_id, presenter_name, presenter_email, created_at,
                  last_active, status, total_slides, max_slides, viewer_count,
-                 settings, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 settings, metadata, is_private, password_hash, password_salt, access_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 session.session_id,
                 session.presenter_name,
@@ -341,6 +408,10 @@ class CloudSessionManager:
                 session.viewer_count,
                 str(session.settings),
                 str(session.metadata),
+                1 if session.is_private else 0,
+                session.password_hash,
+                session.password_salt,
+                session.access_type,
             ))
 
             conn.commit()
