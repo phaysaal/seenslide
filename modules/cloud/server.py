@@ -3,15 +3,16 @@
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Depends, Request, Header
+from fastapi import FastAPI, HTTPException, Depends, Request, Header, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import os
 
 from modules.cloud.session_manager import CloudSessionManager, SessionIDGenerator
+from modules.cloud.slide_storage import CloudSlideStorage
 from modules.cloud.security import (
     RateLimiter,
     SessionTokenManager,
@@ -65,8 +66,28 @@ class ErrorResponse(BaseModel):
     details: Optional[str] = None
 
 
+class SlideResponse(BaseModel):
+    """Response model for slide info."""
+    slide_id: str
+    session_id: str
+    slide_number: int
+    timestamp: float
+    width: int
+    height: int
+    file_size_bytes: int
+    uploaded_at: float
+
+
+class SlideListResponse(BaseModel):
+    """Response model for list of slides."""
+    session_id: str
+    total_slides: int
+    slides: list[SlideResponse]
+
+
 # Global instances
 session_manager: CloudSessionManager = None
+slide_storage: CloudSlideStorage = None
 rate_limiter: RateLimiter = None
 token_manager: SessionTokenManager = None
 
@@ -74,14 +95,17 @@ token_manager: SessionTokenManager = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown."""
-    global session_manager, rate_limiter, token_manager
+    global session_manager, slide_storage, rate_limiter, token_manager
 
     # Startup
     logger.info("Starting SeenSlide Cloud Server")
 
     # Initialize managers
     db_path = os.getenv("SEENSLIDE_DB_PATH", "/tmp/seenslide_cloud.db")
+    storage_path = os.getenv("SEENSLIDE_STORAGE_PATH", "/tmp/seenslide_slides")
+
     session_manager = CloudSessionManager(db_path=db_path)
+    slide_storage = CloudSlideStorage(db_path=db_path, storage_path=storage_path)
 
     # Rate limiter: 100 requests per minute per IP
     rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
@@ -319,6 +343,191 @@ def create_cloud_app() -> FastAPI:
             valid=is_valid,
             message=error_message if not is_valid else "Password verified"
         )
+
+    @app.post(
+        "/api/cloud/session/{session_id}/upload-slide",
+        response_model=SlideResponse,
+        responses={
+            404: {"model": ErrorResponse, "description": "Session not found"},
+            400: {"model": ErrorResponse, "description": "Invalid request"},
+            413: {"model": ErrorResponse, "description": "File too large"}
+        }
+    )
+    @limiter.limit("30/minute")
+    async def upload_slide(
+        request: Request,
+        session_id: str,
+        slide_number: int,
+        file: UploadFile = File(...)
+    ):
+        """Upload a slide image to a session.
+
+        Args:
+            session_id: The session ID
+            slide_number: Slide sequence number
+            file: Image file (PNG, JPG, etc.)
+
+        Returns:
+            Uploaded slide information
+
+        Rate limit: 30 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get session
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Check session capacity
+        if not session.has_capacity():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Session has reached maximum slides ({session.max_slides})"
+            )
+
+        # Check file size (max 10MB)
+        contents = await file.read()
+        if len(contents) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="File must be an image")
+
+        try:
+            # Save slide
+            slide = slide_storage.save_slide(
+                session_id=session_id,
+                slide_number=slide_number,
+                image_data=contents,
+                generate_thumbnail=True
+            )
+
+            # Increment session slide count
+            session_manager.increment_slide_count(session_id)
+
+            logger.info(f"Slide uploaded: {session_id}/slide_{slide_number}")
+
+            return SlideResponse(
+                slide_id=slide.slide_id,
+                session_id=slide.session_id,
+                slide_number=slide.slide_number,
+                timestamp=slide.timestamp,
+                width=slide.width,
+                height=slide.height,
+                file_size_bytes=slide.file_size_bytes,
+                uploaded_at=slide.uploaded_at
+            )
+
+        except ValueError as e:
+            logger.error(f"Failed to upload slide: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"Unexpected error uploading slide: {e}")
+            raise HTTPException(status_code=500, detail="Internal server error")
+
+    @app.get(
+        "/api/cloud/session/{session_id}/slides",
+        response_model=SlideListResponse,
+        responses={
+            404: {"model": ErrorResponse, "description": "Session not found"},
+            400: {"model": ErrorResponse, "description": "Invalid session ID"}
+        }
+    )
+    @limiter.limit("60/minute")
+    async def list_session_slides(request: Request, session_id: str):
+        """List all slides for a session.
+
+        Args:
+            session_id: The session ID
+
+        Returns:
+            List of slides
+
+        Rate limit: 60 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get session
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Get slides
+        slides = slide_storage.list_slides(session_id)
+
+        return SlideListResponse(
+            session_id=session_id,
+            total_slides=len(slides),
+            slides=[
+                SlideResponse(
+                    slide_id=s.slide_id,
+                    session_id=s.session_id,
+                    slide_number=s.slide_number,
+                    timestamp=s.timestamp,
+                    width=s.width,
+                    height=s.height,
+                    file_size_bytes=s.file_size_bytes,
+                    uploaded_at=s.uploaded_at
+                )
+                for s in slides
+            ]
+        )
+
+    @app.get("/api/cloud/slides/{session_id}/{slide_number}")
+    @limiter.limit("100/minute")
+    async def get_slide_image(request: Request, session_id: str, slide_number: int):
+        """Get slide image file.
+
+        Args:
+            session_id: The session ID
+            slide_number: Slide number
+
+        Returns:
+            Slide image file
+
+        Rate limit: 100 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get slide file
+        image_data = slide_storage.get_slide_file(session_id, slide_number)
+        if not image_data:
+            raise HTTPException(status_code=404, detail="Slide not found")
+
+        return Response(content=image_data, media_type="image/png")
+
+    @app.get("/api/cloud/slides/{session_id}/{slide_number}/thumbnail")
+    @limiter.limit("100/minute")
+    async def get_slide_thumbnail(request: Request, session_id: str, slide_number: int):
+        """Get slide thumbnail image.
+
+        Args:
+            session_id: The session ID
+            slide_number: Slide number
+
+        Returns:
+            Thumbnail image file
+
+        Rate limit: 100 requests per minute per IP.
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        # Get thumbnail file
+        image_data = slide_storage.get_thumbnail_file(session_id, slide_number)
+        if not image_data:
+            raise HTTPException(status_code=404, detail="Thumbnail not found")
+
+        return Response(content=image_data, media_type="image/jpeg")
 
     @app.get("/api/cloud/sessions")
     @limiter.limit("20/minute")

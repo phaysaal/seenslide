@@ -121,20 +121,73 @@ class SlideViewer {
 
     async loadSlides() {
         try {
-            // TODO: Replace with actual API endpoint when implemented
-            // For now, show placeholder
             this.updateSessionInfo();
 
             // Check if there are slides
             if (this.session.total_slides === 0) {
                 this.showNoSlides();
+                return;
+            }
+
+            // Fetch slides from API
+            const response = await fetch(`/api/cloud/session/${this.sessionId}/slides`);
+
+            if (!response.ok) {
+                throw new Error('Failed to load slides');
+            }
+
+            const data = await response.json();
+
+            // Build slide objects with URLs
+            this.slides = data.slides.map(slide => ({
+                ...slide,
+                url: `/api/cloud/slides/${this.sessionId}/${slide.slide_number}`,
+                thumbnailUrl: `/api/cloud/slides/${this.sessionId}/${slide.slide_number}/thumbnail`
+            }));
+
+            // Create thumbnails
+            this.createThumbnails();
+
+            // Show first slide
+            if (this.slides.length > 0) {
+                this.showSlide(0);
             } else {
-                // This will be implemented when we add the slides API
-                console.log('Slides will be loaded from API');
+                this.showNoSlides();
             }
         } catch (error) {
             console.error('Error loading slides:', error);
+            this.showError('Error', 'Failed to load slides');
         }
+    }
+
+    createThumbnails() {
+        const thumbnailStrip = document.getElementById('thumbnailStrip');
+        thumbnailStrip.innerHTML = ''; // Clear existing thumbnails
+
+        this.slides.forEach((slide, index) => {
+            const thumbDiv = document.createElement('div');
+            thumbDiv.className = 'thumbnail';
+            thumbDiv.dataset.index = index;
+
+            const thumbImg = document.createElement('img');
+            thumbImg.src = slide.thumbnailUrl;
+            thumbImg.alt = `Slide ${slide.slide_number}`;
+            thumbImg.loading = 'lazy';
+
+            const thumbLabel = document.createElement('div');
+            thumbLabel.className = 'thumbnail-label';
+            thumbLabel.textContent = slide.slide_number;
+
+            thumbDiv.appendChild(thumbImg);
+            thumbDiv.appendChild(thumbLabel);
+
+            // Click handler to jump to slide
+            thumbDiv.addEventListener('click', () => {
+                this.showSlide(index);
+            });
+
+            thumbnailStrip.appendChild(thumbDiv);
+        });
     }
 
     updateSessionInfo() {
