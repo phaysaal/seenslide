@@ -116,6 +116,31 @@ class CloudSessionManager:
                 ON cloud_sessions(last_active)
             """)
 
+            # Create slides table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS cloud_slides (
+                    slide_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    slide_number INTEGER NOT NULL,
+                    timestamp REAL NOT NULL,
+                    file_path TEXT,
+                    thumbnail_path TEXT,
+                    width INTEGER,
+                    height INTEGER,
+                    file_size_bytes INTEGER,
+                    uploaded_at REAL,
+                    metadata TEXT,
+                    FOREIGN KEY (session_id) REFERENCES cloud_sessions(session_id),
+                    UNIQUE(session_id, slide_number)
+                )
+            """)
+
+            # Create index on session_id and slide_number for faster queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_session_slides
+                ON cloud_slides(session_id, slide_number)
+            """)
+
             conn.commit()
             conn.close()
             logger.info(f"Database initialized at {self.db_path}")

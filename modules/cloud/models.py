@@ -124,30 +124,42 @@ class CloudSlide:
     """Represents a slide in a cloud session.
 
     Attributes:
+        slide_id: Unique identifier for the slide
         session_id: ID of the session this slide belongs to
         slide_number: Sequence number (1, 2, 3, ...)
         timestamp: Unix timestamp when uploaded
-        file_size: Size in bytes
-        width: Image width
-        height: Image height
+        file_path: Path to the slide image file
+        thumbnail_path: Path to the thumbnail image
+        width: Image width in pixels
+        height: Image height in pixels
+        file_size_bytes: Size in bytes
         uploaded_at: Unix timestamp when uploaded to cloud
+        metadata: Additional metadata
     """
+    slide_id: str
     session_id: str
     slide_number: int
     timestamp: float
-    file_size: int = 0
+    file_path: Optional[str] = None
+    thumbnail_path: Optional[str] = None
     width: int = 0
     height: int = 0
+    file_size_bytes: int = 0
     uploaded_at: float = field(default_factory=time.time)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
+            "slide_id": self.slide_id,
             "session_id": self.session_id,
             "slide_number": self.slide_number,
             "timestamp": self.timestamp,
-            "file_size": self.file_size,
+            "file_path": self.file_path,
+            "thumbnail_path": self.thumbnail_path,
             "width": self.width,
             "height": self.height,
+            "file_size_bytes": self.file_size_bytes,
             "uploaded_at": self.uploaded_at,
+            "metadata": self.metadata,
         }
