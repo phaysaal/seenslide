@@ -575,7 +575,7 @@ def create_cloud_app() -> FastAPI:
     @app.get("/api/cloud/stats")
     async def get_stats():
         """Get server statistics."""
-        return session_manager.get_stats()
+        return await session_manager.get_stats()
 
     # Mount static files
     static_dir = Path(__file__).parent / "static"
