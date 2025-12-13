@@ -2,9 +2,11 @@
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import os
@@ -349,6 +351,33 @@ def create_cloud_app() -> FastAPI:
     async def get_stats():
         """Get server statistics."""
         return session_manager.get_stats()
+
+    # Mount static files
+    static_dir = Path(__file__).parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # Viewer route (catch-all for session IDs)
+    @app.get("/{session_id}", response_class=HTMLResponse)
+    async def serve_viewer(session_id: str):
+        """Serve the viewer page for a session.
+
+        Args:
+            session_id: Session ID in format XXX-NNNN
+
+        Returns:
+            Viewer HTML page
+        """
+        # Validate session ID format
+        if not SessionIDGenerator.is_valid(session_id):
+            raise HTTPException(status_code=404, detail="Invalid session ID format")
+
+        # Serve viewer HTML
+        viewer_path = static_dir / "viewer.html"
+        if not viewer_path.exists():
+            raise HTTPException(status_code=500, detail="Viewer not found")
+
+        return FileResponse(viewer_path)
 
     return app
 

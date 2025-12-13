@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SeenSlide Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css">
+</head>
+<body>
+    <!-- Password Modal -->
+    <div id="passwordModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>🔒 Private Session</h2>
+            <p>This presentation is password-protected</p>
+            <form id="passwordForm">
+                <input
+                    type="password"
+                    id="passwordInput"
+                    placeholder="Enter password"
+                    autocomplete="off"
+                    required
+                />
+                <div class="modal-buttons">
+                    <button type="submit" class="btn-primary">Unlock</button>
+                </div>
+            </form>
+            <div id="passwordError" class="error" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Session Not Found -->
+    <div id="notFoundScreen" class="error-screen" style="display: none;">
+        <div class="error-content">
+            <h1>404</h1>
+            <h2>Session Not Found</h2>
+            <p>The presentation you're looking for doesn't exist or has ended.</p>
+            <a href="/" class="btn-primary">Go Home</a>
+        </div>
+    </div>
+
+    <!-- Loading Screen -->
+    <div id="loadingScreen" class="loading-screen">
+        <div class="spinner"></div>
+        <p>Loading presentation...</p>
+    </div>
+
+    <!-- Main Viewer -->
+    <div id="viewerContainer" class="viewer-container" style="display: none;">
+        <!-- Header -->
+        <header class="viewer-header">
+            <div class="session-info">
+                <h1 id="sessionTitle">Loading...</h1>
+                <div class="session-meta">
+                    <span id="sessionPresenter"></span>
+                    <span id="sessionStatus"></span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="fullscreenBtn" class="icon-btn" title="Fullscreen">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M2 2h6v2H4v4H2V2zm0 12v4h4v-2H4v-2H2zm14-12v4h-2V4h-4V2h6zm-2 12v2h-4v2h6v-6h-2v2z"/>
+                    </svg>
+                </button>
+                <span id="slideCounter" class="slide-counter">0 / 0</span>
+            </div>
+        </header>
+
+        <!-- Slide Display -->
+        <main class="slide-display">
+            <div id="slideContainer" class="slide-container">
+                <div id="noSlidesMessage" class="no-slides">
+                    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" stroke="currentColor">
+                        <rect x="8" y="12" width="48" height="36" rx="2" stroke-width="2"/>
+                        <path d="M8 20h48M20 28h24M20 36h16" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <p>No slides yet</p>
+                    <p class="hint">Slides will appear here when the presenter shares them</p>
+                </div>
+                <img id="currentSlide" class="slide-image" style="display: none;" alt="Current Slide" />
+            </div>
+
+            <!-- Navigation Controls -->
+            <div class="slide-nav">
+                <button id="prevBtn" class="nav-btn" title="Previous Slide">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+                    </svg>
+                </button>
+                <button id="nextBtn" class="nav-btn" title="Next Slide">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
+                    </svg>
+                </button>
+            </div>
+        </main>
+
+        <!-- Thumbnail Strip -->
+        <aside id="thumbnailStrip" class="thumbnail-strip">
+            <div class="thumbnails-container" id="thumbnailsContainer">
+                <!-- Thumbnails will be inserted here -->
+            </div>
+        </aside>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+</body>
+</html>
